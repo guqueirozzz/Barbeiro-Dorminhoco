@@ -1,103 +1,97 @@
-#include "stdio.h"
-#include "unistd.h"
-#include "stdlib.h"
-#include "pthread.h"
-#include "semaphore.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+#include <Windows.h>
 
-#define CHAIRS 5                /* número de cadeiras para os clientes à espera */
-#define TRUE 1
+//MAX representa o número de cadeiras da sala de espera
+#define MAX 1
 
-int horas = 0;
-int cliente = 0;
-float dorme = 0;
-
-sem_t customers;                /* número de cliente à espera de atendimento */
-sem_t barbers;                  /* número de barbeiros à espera de clientes */
-sem_t mutex;                    /* para exclusão mútua */
-int waiting = 0;                /* clientes que estão esperando (não estão cortando) */
-
-/* protótipos */
-void* barber(void *arg);
-void* customer(void *arg);
-void cut_hair();
-void customer_arrived();
-void get_haircut();
-void giveup_haircut();
-
-int main() {
-sem_init(&customers, TRUE, 0);
-sem_init(&barbers, TRUE, 0);
-sem_init(&mutex, TRUE, 1);
-
-pthread_t b, c;
-
- /* criando único barbeiro */
- pthread_create(&b, NULL, (void *) barber, NULL);
+//Utiliza-se MAX+1, pois deve-se levar em conta a cadeira do barbeiro
+int comeco = 0, fim = 0, tam = 0, fila[MAX+1];
+pthread_mutex_t travaFila;
 
 
- /* criação indefinida de clientes */
- while(TRUE) {
-pthread_create(&c, NULL, (void *) customer, NULL);
-sleep(1);
-
+int voidd()
+{
+  return !tam;
 }
 
-printf("Dorme: %d, Clientes: %d, Horas:24",dorme, cliente, horas);
-return 0;
+int desenfilera()
+{
+  if (!voidd())
+  {
+    srand(time(NULL));
+    Sleep(rand() % 1 + 25); // O barbeiro atende os clientes em media a cada 25 minutos.
+    printf("O barbeiro termina de cortar o cabelo do cliente %d, que vai embora.\n", fila[comeco]);
+
+    int cliente = fila[comeco];
+    comeco = (comeco+1) % (MAX+1);
+    tam--;
+
+    if (voidd())
+      puts("Não há clientes para serem atendidos, o barbeiro vai dormir.");
+    else
+      printf("O cliente %d senta na cadeira do barbeiro.\n", fila[comeco]);
+
+    return cliente;
+  }
+ else
+    //O barbeiro está dormindo, portanto nada ocorre e a função retorna -1 como código de erro
+    return -1;
 }
 
-void* barber(void *arg) {
-while(horas<25) {
-horas++;
-sem_wait(&customers);   /* vai dormir se o número de clientes for 0 */
-dorme+=0.1;
-sem_wait(&mutex);       /* obtém acesso a 'waiting' */
-waiting = waiting - 1;  /*descresce de um o contador de clientes à espera */
-sem_post(&barbers);     /* um barbeiro está agora pronto para cortar cabelo */
-sem_post(&mutex);       /* libera 'waiting' */
-cut_hair();             /* corta o cabelo (fora da região crítica) */
+void enfilera(int cliente)
+{
+  if (tam < MAX+1)
+  {
+    if (voidd())
+      printf("O cliente %d acorda o barbeiro e senta em sua cadeira.\n", cliente);
+    else
+      printf("O cliente %d senta em uma das cadeiras vagas da sala de espera.\n", cliente);
+
+    fila[fim] = cliente;
+    fim = (fim+1) % (MAX+1);
+    tam++;
+  }
+ else
+    printf("Todas as cadeiras estavam ocupadas, o cliente %d foi embora.\n", cliente);
 }
 
-pthread_exit(NULL);
-}
 
-void* customer(void *arg) {
-
-sem_wait(&mutex);           /* entra na região crítica */
-
-if(waiting < CHAIRS) {      /* se não houver cadeiras vazias, saia */
-customer_arrived();
-waiting = waiting + 1;  /* incrementa o contador de clientes à espera */
-sem_post(&customers);   /* acorda o barbeiro se necessário */
-sem_post(&mutex);       /* libera o acesso a 'waiting' */
-sem_wait(&barbers);     /* vai dormir se o número de barbeiros livres for 0 */
-get_haircut();          /* sentado e sendo servido */
-} else {
-sem_post(&mutex);       /* a barbearia está cheia; não espera */
-giveup_haircut();
-
-}
-
-pthread_exit(NULL);
-}
-
-void cut_hair() {
-printf("Barbeiro estah cortando o cabelo de alguem!\n");
-sleep(0.41);
-}
-
-void customer_arrived() {
-printf("Cliente chegou para cortar cabelo!\n");
-printf("Dorme: %f, Clientes: %d, Horas:%d ",dorme, cliente, horas);
-if(horas>24){
-    printf("Dorme: %f, Clientes: %d, Horas:24",dorme, cliente, horas);
+void* barbeiro(void* arg)
+{
+  for ( ; ; )
+  {
+    pthread_mutex_trylock(&travaFila);
+    desenfilera();
+    pthread_mutex_unlock(&travaFila);
   }
 }
-void get_haircut() {
-printf("Cliente estah tendo o cabelo cortado!\n");
-cliente++;
+
+void* cliente(void* arg)
+{
+  unsigned long cd_cliente = *((unsigned long*) arg);
+
+  pthread_mutex_trylock(&travaFila);
+  enfilera(cd_cliente);
+  pthread_mutex_unlock(&travaFila);
 }
 
-void giveup_haircut() {
-printf("Cliente desistiu! (O salao estah muito cheio!)\n");
+
+int main(){
+  pthread_mutex_init(&travaFila, NULL); //mutex para o travaFila
+
+  int i;
+  pthread_t threadbarb, threadcli; // paramtrização das threads para o barbeiro e para o cliente 
+
+  pthread_create(&threadbarb, NULL, barbeiro, NULL); // criação de thread para o barbeiro
+  srand(time(NULL));
+  for (i = 0 ; ; ++i)
+  {
+    Sleep(rand() % 1 + 30); //Intervalo de tempo para a chegada de clientes
+    pthread_create(&threadcli, NULL, cliente, &i); // criação de thread para o cliente 
+  }
+
+  return 0;
 }
